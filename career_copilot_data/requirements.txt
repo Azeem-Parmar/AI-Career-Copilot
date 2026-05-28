@@ -1,7 +1,0 @@
-streamlit
-pdfplumber
-pandas
-plotly
-scikit-learn
-google-generativeai
-protobuf==3.20.3
