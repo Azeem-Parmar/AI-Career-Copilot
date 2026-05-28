@@ -1,0 +1,42 @@
+[
+  {
+    "timestamp": "2026-05-28 11:00:49",
+    "ats_score": 68,
+    "skills_count": 12,
+    "found_skills": [
+      "nlp",
+      "git",
+      "artificial intelligence",
+      "problem solving",
+      "github",
+      "scikit-learn",
+      "matplotlib",
+      "numpy",
+      "python",
+      "communication",
+      "pandas",
+      "machine learning"
+    ],
+    "resume_pages": 0
+  },
+  {
+    "timestamp": "2026-05-28 11:15:32",
+    "ats_score": 68,
+    "skills_count": 12,
+    "found_skills": [
+      "numpy",
+      "matplotlib",
+      "github",
+      "pandas",
+      "git",
+      "problem solving",
+      "artificial intelligence",
+      "machine learning",
+      "scikit-learn",
+      "python",
+      "nlp",
+      "communication"
+    ],
+    "resume_pages": 0
+  }
+]
