@@ -11,24 +11,8 @@ import os
 
 from datetime import datetime
 from pathlib import Path
-from utils.storage_manager import (
-    load_history,
-    save_to_history,
-    load_comparisons,
-    save_comparison,
-    clear_all_data
-)
-from utils.pdf_extractor import extract_resume_text
-from backend.ats.skill_extractor import extract_skills
-from backend.ats.ats_engine import calculate_ats_score
-from backend.recommender.recommender_engine import recommend_jobs, jobs_df
-from backend.chatbot.chatbot_engine import chatbot_response
-
-from backend.analytics.analytics_engine import (
-    calculate_history_statistics,
-    prepare_trend_data,
-    compare_analyses
-)
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # =========================================================
 # PAGE CONFIG
@@ -651,6 +635,67 @@ st.markdown("""
 
 st.markdown("---")
 
+# =========================================================
+# SKILLS DATABASE
+# =========================================================
+
+skills = [
+    "python","java","c++","html","css","javascript","react",
+    "nodejs","sql","mysql","mongodb","machine learning",
+    "deep learning","artificial intelligence","data science",
+    "nlp","computer vision","opencv","tensorflow","pytorch",
+    "keras","scikit-learn","pandas","numpy","matplotlib",
+    "seaborn","streamlit","flask","django","fastapi",
+    "power bi","excel","statistics","linux","docker",
+    "kubernetes","aws","api","git","github",
+    "problem solving","data structures","communication",
+    "leadership"
+]
+
+# =========================================================
+# JOB DATASET
+# =========================================================
+
+jobs_data = {
+
+    "Job Role": [
+        "Data Scientist",
+        "Machine Learning Engineer",
+        "AI Engineer",
+        "Data Analyst",
+        "Frontend Developer",
+        "Backend Developer",
+        "Computer Vision Engineer",
+        "NLP Engineer",
+        "Cloud Engineer",
+        "Software Engineer"
+    ],
+
+    "Skills": [
+
+        "python machine learning deep learning pandas numpy scikit-learn matplotlib statistics sql data analysis artificial intelligence",
+
+        "python tensorflow keras pytorch machine learning deep learning ml ops pandas numpy scikit-learn",
+
+        "python artificial intelligence machine learning deep learning nlp transformers tensorflow pytorch numpy pandas",
+
+        "python pandas numpy excel power bi sql statistics data visualization matplotlib analytics",
+
+        "html css javascript react nodejs frontend web development api",
+
+        "python flask django fastapi sql api backend development mongodb",
+
+        "opencv python deep learning tensorflow pytorch computer vision image processing numpy",
+
+        "nlp python transformers spacy bert machine learning deep learning pandas numpy",
+
+        "aws docker kubernetes linux python cloud computing devops api",
+
+        "java c++ python problem solving data structures algorithms git github software development"
+    ]
+}
+
+jobs_df = pd.DataFrame(jobs_data)
 
 # =========================================================
 # FILE UPLOAD SECTION
@@ -680,14 +725,67 @@ if uploaded_file is not None:
     # =====================================================
     # EXTRACT TEXT
     # =====================================================
-    
-    resume_text, total_pages = extract_resume_text(uploaded_file)
+
+    resume_text = ""
+
+    with pdfplumber.open(uploaded_file) as pdf:
+
+        for page in pdf.pages:
+
+            text = page.extract_text()
+
+            if text:
+                resume_text += text
 
     # =====================================================
     # SKILL EXTRACTION
     # =====================================================
 
-    found_skills = extract_skills(resume_text)
+    resume_lower = resume_text.lower()
+
+    found_skills = []
+
+    for skill in skills:
+
+        if skill.lower() in resume_lower:
+            found_skills.append(skill)
+
+    found_skills = list(set(found_skills))
+
+    # =====================================================
+    # ATS SCORE
+    # =====================================================
+
+    def calculate_ats_score(found_skills):
+
+        score = 0
+
+        score += len(found_skills) * 4
+
+        important_skills = [
+            "python",
+            "machine learning",
+            "deep learning",
+            "tensorflow",
+            "nlp",
+            "sql",
+            "opencv",
+            "streamlit",
+            "scikit-learn"
+        ]
+
+        matched_important = 0
+
+        for skill in important_skills:
+
+            if skill in found_skills:
+                matched_important += 1
+
+        score += matched_important * 5
+
+        score = min(score, 100)
+
+        return score
 
     ats_score = calculate_ats_score(found_skills)
 
@@ -755,13 +853,13 @@ if uploaded_file is not None:
     with col4:
         st.metric(
             label="Resume Pages",
-            value=total_pages,
+            value=len(pdf.pages),
             delta="Analyzed",
             delta_color="off"
         )
 
     # Update analysis data with actual page count
-    analysis_data["resume_pages"] = total_pages
+    analysis_data["resume_pages"] = len(pdf.pages)
 
     st.markdown("---")
 
@@ -865,7 +963,61 @@ if uploaded_file is not None:
         <h2 style="margin-bottom: 1.5rem;">💼 Recommended Jobs</h2>
         """, unsafe_allow_html=True)
 
-        recommended_jobs, top_jobs = recommend_jobs(found_skills)
+        user_skills_text = " ".join(found_skills)
+
+        job_skills = jobs_df["Skills"].tolist()
+
+        all_text = job_skills + [user_skills_text]
+
+        vectorizer = TfidfVectorizer()
+
+        tfidf_matrix = vectorizer.fit_transform(all_text)
+
+        cosine_sim = cosine_similarity(
+            tfidf_matrix[-1],
+            tfidf_matrix[:-1]
+        )
+
+        cosine_scores = cosine_sim[0]
+
+        final_scores = []
+
+        for i, skills_text in enumerate(job_skills):
+
+            job_skill_set = set(skills_text.split())
+
+            user_skill_set = set(found_skills)
+
+            common_skills = user_skill_set.intersection(job_skill_set)
+
+            overlap_score = (
+                len(common_skills) / len(job_skill_set)
+            ) * 100
+
+            cosine_score = cosine_scores[i] * 100
+
+            final_score = (
+                0.5 * cosine_score +
+                0.5 * overlap_score
+            )
+
+            final_score += len(common_skills) * 5
+
+            if len(common_skills) >= 3:
+                final_score += 25
+
+            final_score = min(final_score, 100)
+
+            final_scores.append(final_score)
+
+        jobs_df["Match %"] = final_scores
+
+        recommended_jobs = jobs_df.sort_values(
+            by="Match %",
+            ascending=False
+        )
+
+        top_jobs = recommended_jobs.head(3)
 
         for index, row in top_jobs.iterrows():
             match_pct = row['Match %']
@@ -948,7 +1100,7 @@ if uploaded_file is not None:
 
     target_skills = set()
 
-    for skill in skill:
+    for skill in skills:
 
         if skill.lower() in job_skills_text.lower():
             target_skills.add(skill)
@@ -1137,46 +1289,34 @@ with history_tab:
         """, unsafe_allow_html=True)
         
         stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
-
-        stats = calculate_history_statistics(history)
-
-    with stats_col1:
-        st.metric(
-            "Total Analyses",
-            stats["total_analyses"]
-        )
-
-    with stats_col2:
-        st.metric(
-            "Avg ATS Score",
-            f"{stats['avg_ats']:.1f}"
-        )
-
-    with stats_col3:
-        st.metric(
-            "Best ATS Score",
-            stats["max_ats"]
-        )
-
-    with stats_col4:
-        st.metric(
-            "Total Skills Found",
-            stats["total_skills"]
-        )
-            
-      
+        
+        with stats_col1:
+            st.metric("Total Analyses", len(history))
+        
+        with stats_col2:
+            avg_ats = sum(item.get('ats_score', 0) for item in history) / len(history) if history else 0
+            st.metric("Avg ATS Score", f"{avg_ats:.1f}")
+        
+        with stats_col3:
+            max_ats = max((item.get('ats_score', 0) for item in history), default=0)
+            st.metric("Best ATS Score", max_ats)
+        
+        with stats_col4:
+            total_skills = sum(item.get('skills_count', 0) for item in history)
+            st.metric("Total Skills Found", total_skills)
         
         # Trend Chart
-        if stats["total_analyses"] > 1:
+        if len(history) > 1:
             st.markdown("---")
             st.markdown("""
             <h3>📊 ATS Score Trend</h3>
             """, unsafe_allow_html=True)
-
-
-            trend_data = prepare_trend_data(history)
             
-    
+            trend_data = pd.DataFrame({
+                'Analysis': [f"#{i+1}" for i in range(len(history))],
+                'ATS Score': [item.get('ats_score', 0) for item in history]
+            })
+            
             fig_trend = px.line(
                 trend_data,
                 x='Analysis',
@@ -1210,8 +1350,8 @@ with history_tab:
             st.success("All history cleared!")
             st.rerun()
     
-        else:
-            st.info("💡 No analysis history yet. Upload a resume to start tracking your progress!")
+    else:
+        st.info("💡 No analysis history yet. Upload a resume to start tracking your progress!")
 
 with comparison_tab:
     st.markdown("""
@@ -1250,15 +1390,67 @@ with comparison_tab:
             comp_col1, comp_col2, comp_col3 = st.columns(3)
             
             with comp_col1:
-                comparison_data = compare_analyses(
-    analysis1,
-    analysis2
-)
+                score1 = analysis1.get('ats_score', 0)
+                score2 = analysis2.get('ats_score', 0)
+                improvement = score2 - score1
                 
-         
+                st.markdown(f"""
+                <div class="metric-card">
+                    <h3>ATS Score Change</h3>
+                    <h1>{improvement:+.0f}</h1>
+                    <p style="color: #8a96b8;">
+                        {'📈 Improved!' if improvement > 0 else '📉 Decreased' if improvement < 0 else '➡️ No change'}
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with comp_col2:
+                skills1 = set(analysis1.get('found_skills', []))
+                skills2 = set(analysis2.get('found_skills', []))
+                new_skills = skills2 - skills1
+                
+                st.markdown(f"""
+                <div class="metric-card">
+                    <h3>New Skills Added</h3>
+                    <h1>{len(new_skills)}</h1>
+                    <p style="color: #8a96b8;">Skills gained</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with comp_col3:
+                removed_skills = skills1 - skills2
+                
+                st.markdown(f"""
+                <div class="metric-card">
+                    <h3>Skills Details</h3>
+                    <h1>{len(skills2)}</h1>
+                    <p style="color: #8a96b8;">Current total</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # New Skills Display
+            if new_skills:
+                st.markdown("---")
+                st.markdown("""
+                <h3>✨ New Skills Acquired</h3>
+                """, unsafe_allow_html=True)
+                
+                for skill in sorted(new_skills):
+                    st.markdown(
+                        f"<span class='skill-box'>✨ {skill}</span>",
+                        unsafe_allow_html=True
+                    )
+            
+            # Comparison Chart
+            st.markdown("---")
+            comparison_df = pd.DataFrame({
+                'Analysis': ['Analysis 1', 'Analysis 2'],
+                'ATS Score': [analysis1.get('ats_score', 0), analysis2.get('ats_score', 0)],
+                'Skills': [analysis1.get('skills_count', 0), analysis2.get('skills_count', 0)]
+            })
             
             fig_comp = px.bar(
-                comparison_data["comparison_df"],
+                comparison_df,
                 x='Analysis',
                 y=['ATS Score', 'Skills'],
                 title=None,
@@ -1311,7 +1503,148 @@ user_question = st.text_input(
 
 # Chat Response Logic
 if user_question:
-    response = chatbot_response(user_question)
+
+
+    question = user_question.lower()
+
+    response = ""
+
+    # =====================================================
+    # ATS QUESTIONS
+    # =====================================================
+
+    if "ats" in question:
+
+        response = """
+        ✅ ATS Optimization Tips
+
+        • Add technical keywords
+        • Use clean resume formatting
+        • Add measurable achievements
+        • Mention tools & technologies
+        • Include project experience
+        • Add certifications
+        """
+
+    # =====================================================
+    # RESUME QUESTIONS
+    # =====================================================
+
+    elif "resume" in question:
+
+        response = """
+        📄 Resume Improvement Tips
+
+        • Keep resume concise
+        • Add strong AI/ML projects
+        • Mention GitHub links
+        • Add quantified achievements
+        • Use ATS-friendly formatting
+        • Add technical skills section
+        """
+
+    # =====================================================
+    # SKILLS QUESTIONS
+    # =====================================================
+
+    elif "skill" in question:
+
+        response = """
+        🚀 Important AI/ML Skills
+
+        • Python
+        • Machine Learning
+        • Deep Learning
+        • NLP
+        • TensorFlow
+        • PyTorch
+        • SQL
+        • Streamlit
+        • Data Structures
+        """
+
+    # =====================================================
+    # PROJECT QUESTIONS
+    # =====================================================
+
+    elif "project" in question:
+
+        response = """
+        💡 Recommended AI Projects
+
+        • AI Career Copilot
+        • AI Interview Bot
+        • Fake News Detection
+        • Medical Diagnosis AI
+        • Stock Market Prediction
+        • AI Resume Analyzer
+        """
+
+    # =====================================================
+    # ROADMAP QUESTIONS
+    # =====================================================
+
+    elif "roadmap" in question:
+
+        response = """
+        🛣️ AI/ML Roadmap
+
+        1. Learn Python
+        2. Learn Machine Learning
+        3. Build Projects
+        4. Learn Deep Learning
+        5. Build Portfolio
+        6. Learn Deployment
+        7. Practice DSA
+        """
+
+    # =====================================================
+    # JOB QUESTIONS
+    # =====================================================
+
+    elif "job" in question or "career" in question:
+
+        response = """
+        💼 Career Advice
+
+        • Build strong projects
+        • Optimize your resume
+        • Improve LinkedIn profile
+        • Practice interviews
+        • Contribute to GitHub
+        • Learn system design basics
+        """
+
+    # =====================================================
+    # DEFAULT RESPONSE
+    # =====================================================
+
+    else:
+
+        response = """
+        🤖 I can help you with:
+
+        • ATS optimization
+        • Resume improvement
+        • AI/ML roadmap
+        • Career guidance
+        • Skill recommendations
+        • Project ideas
+        • Job preparation
+       """
+        
+
+
+    # =====================================================
+    # DISPLAY CHAT RESPONSE
+    # =====================================================
+    # =====================================================
+    # AI RESPONSE UI
+    # =====================================================
+
+    # =====================================================
+    # CLEAN RESPONSE
+    # =====================================================
 
     response = response.replace("<p>", "")
     response = response.replace("</p>", "")
@@ -1348,6 +1681,3 @@ if user_question:
 
     </div>
     """, unsafe_allow_html=True)
-
-    
-                                    
